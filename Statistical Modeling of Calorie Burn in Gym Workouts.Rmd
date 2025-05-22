@@ -1,0 +1,553 @@
+---
+title: "Statistical Modeling of Calorie Burn in Gym Workouts"
+author: "Natali Kostadinovic"
+date: "2024-12-02"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+  pdf_document:
+    number_sections: true
+    fig_caption: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+**1.Introduction:**
+
+Understanding how personal and workout-related factors affect the number
+of calories burned during exercise can help design personalized fitness
+and nutrition programs. This project uses a dataset of gym members to
+explore the relationship between calorie expenditure and key predictors
+including age, gender, workout type, session duration, and body fat
+percentage.
+
+The main research question is:
+
+> **Which variables significantly influence the number of calories
+> burned in a workout session?**
+
+The analysis includes data exploration, regression modeling, outlier
+diagnostics, and model selection using R.
+
+The dataset, originally published on Kaggle, is simulated but based on
+realistic workout patterns and public health data.
+
+```{r, out.width="50%", warning=FALSE, include = T}
+library(ggplot2)
+library(dplyr)
+library(car)
+library(readr)
+library(leaps)
+library(gridExtra)
+library(GGally)
+gym <- read_csv("gym_members_exercise_tracking.csv")
+names(gym) <- c("Age", "Gender", "Weight", "Height", "Max_BPM", "Avg_BPM", "Resting_BPM", "Session_Duration", "Calories_Burned", "Workout_Type", "Fat_Percentage", "Water_Intake", "Workout_Frequency", "Experience_Level", "BMI")
+set.seed(123)
+names(gym)
+ggpairs(gym %>% select(Calories_Burned, Age, Session_Duration, Water_Intake, Fat_Percentage, Workout_Type, Gender))
+
+
+#Source: https://www.kaggle.com/datasets/valakhorasani/gym-members-exercise-dataset?fbclid=IwY2xjawGQqDNleHRuA2FlbQIxMAABHWXxbjoBhN60-umXAWeqGOAXQBUGJm_MvQbBSIrhAGK3GzQFExUwsmU3Cg_aem_ON8I_GTOV_zi3KofVSCWxA
+```
+
+```{r}
+lm_full_before<-lm(Calories_Burned~Age+Session_Duration+Fat_Percentage+Gender + Workout_Type,
+ data=gym)
+ gym<-gym%>%
+ mutate(
+ resid=residuals(lm_full_before)
+ )
+ 
+ggplot(data=gym,mapping=aes(x=resid))+
+ geom_density()+
+ ggtitle("Density plot of Residuals before Transformation")
+ theme_bw()
+
+```
+
+```{r}
+summary_stats1 <- gym %>%
+summarize(
+  count = n(),            # Count of rows
+  mean_Age = mean(Age), # Mean of the column
+  sd_Age = sd(Age)      # Standard deviation
+)
+print(summary_stats1)
+summary_stats2 <- gym %>%
+summarize(
+  count = n(),            # Count of rows
+  mean_Session_Duration = mean(Session_Duration), # Mean of the column
+  sd_Session_Duration = sd(Session_Duration)      # Standard deviation
+)
+print(summary_stats2)
+
+summary_stats <- gym %>%
+summarize(
+  count = n(),            # Count of rows
+  mean_Fat_Percentage = mean(Fat_Percentage), # Mean of the column
+  sd_Fat_Percentage = sd(Fat_Percentage)      # Standard deviation
+)
+print(summary_stats)
+
+```
+
+```{r}
+ggpairs(gym%>%select(Age,Session_Duration,Workout_Type,Fat_Percentage, Gender, Calories_Burned))
+```
+
+**1. Model assumptions diagnostics [ Variable "Age"]:**
+
+-   Independence: We cannot determine independence without additional
+    information on how the data was collected; however, we will assume
+    it is independent.
+
+-   Linearity: Age vs. Calories_Burned: From plot 1 and 2, we can say
+    that the relationship is linear.
+
+-   Equal Variance: The variance assumption is not satisfied at this
+    step, as seen in the Response vs. Explanatory (plot 1) and Residuals
+    vs. Explanatory.(plot 2)
+
+-   Normality: From plot 3, we can say that it is pretty much normally
+    distributed.
+
+-   Outliers: From the Response vs. Explanatory (plot 1) and Residuals
+    vs. Explanatory (plot 2), we observe that there are no outliers.
+
+```{r}
+gym_transformed<-gym%>%
+ transmute(
+   Age = Age,
+   log_Session_Duration =log(Session_Duration),
+   Workout_Type= Workout_Type,
+   sqrt_Fat_Percentage=sqrt(Fat_Percentage),
+   Gender= Gender,
+   log_Calories_Burned=log(Calories_Burned)
+ )
+ggpairs(gym_transformed)
+
+
+
+```
+
+**Interaction Terms Detection:**
+
+```{r}
+ggplot(data=gym_transformed,aes(x=Age,y=log_Calories_Burned,color=Workout_Type))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+ggplot(data=gym_transformed,aes(x=sqrt_Fat_Percentage,y=log_Calories_Burned,color=Workout_Type))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+ggplot(data=gym_transformed,aes(x=log_Session_Duration,y=log_Calories_Burned,color=Workout_Type))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+ggplot(data=gym_transformed,aes(x=Age,y=log_Calories_Burned,color=Gender))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+ggplot(data=gym_transformed,aes(x=sqrt_Fat_Percentage,y=log_Calories_Burned,color=Gender))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+ggplot(data=gym_transformed,aes(x=log_Session_Duration,y=log_Calories_Burned,color=Gender))+
+ geom_point()+
+ geom_smooth(method="lm",se=FALSE)+
+ theme_bw()
+
+
+
+
+```
+
+While non-parallel slopes in exploratory plots suggested possible
+interaction effects, we formally tested interaction terms in extended
+models. These terms were not statistically significant and did not
+improve model fit based on BIC. Therefore, we proceeded without
+interaction terms for clarity and interpretability.
+
+```{r}
+lm_full<-lm(log_Calories_Burned~Age+log_Session_Duration+sqrt_Fat_Percentage+Gender + Workout_Type,
+ data=gym_transformed)
+ gym_transformed<-gym_transformed%>%
+ mutate(
+ resid=residuals(lm_full)
+ )
+ p1<-ggplot(data=gym_transformed,mapping=aes(x=Age,y=resid))+
+ geom_point()+
+ geom_smooth()+
+ theme_bw()
+ p2<-ggplot(data=gym_transformed,mapping=aes(x=log_Session_Duration,y=resid))+
+ geom_point()+
+ geom_smooth()+
+ theme_bw()
+ p3<-ggplot(data=gym_transformed,mapping=aes(x=Workout_Type,y=resid))+
+ geom_point()+
+ geom_smooth()+
+ theme_bw()
+ p4<-ggplot(data=gym_transformed,mapping=aes(x=sqrt_Fat_Percentage,y=resid))+
+ geom_point()+
+ geom_smooth()+
+ theme_bw()
+ p5<-ggplot(data=gym_transformed,mapping=aes(x=Gender,y=resid))+
+ geom_point()+
+ geom_smooth()+
+ theme_bw()
+ p6<-ggplot(data=gym_transformed,mapping=aes(x=resid))+
+ geom_density()+
+ theme_bw()
+ grid.arrange(p1,p2,p3,p4,p5,p6)
+```
+
+```{r}
+summary(lm_full)
+```
+
+**2. Outlier diagnostics**
+
+```{r}
+gym_transformed<-gym_transformed%>%
+ mutate(
+ obs_index=row_number(),
+ h=hatvalues(lm_full),
+ studres=rstudent(lm_full),
+ D=cooks.distance(lm_full)
+ )
+ ggplot(data =gym_transformed, mapping=aes(x=obs_index,y=h))+
+ geom_hline(yintercept=2*8/nrow(gym_transformed))+ # 8 is the number of betas
+ geom_point()+
+ theme_bw()
+ 
+ggplot(data=gym_transformed,mapping=aes(x=obs_index,y=studres))+
+ geom_point()+
+ theme_bw()
+
+ggplot(data=gym_transformed,mapping=aes(x=obs_index,y=D))+
+ geom_point()+
+ theme_bw()
+```
+
+```{r}
+leverage_indices <- which(gym_transformed$h > 2*8/nrow(gym_transformed))
+cooks_indices <- which(gym_transformed$D > 0.005)
+studres_indices <- which((gym_transformed$studres > 3|gym_transformed$studres < -3))
+obs_to_investigate <- unique(c(leverage_indices, cooks_indices, studres_indices))
+obs_to_investigate
+```
+
+```{r}
+gym_transformed[obs_to_investigate, ]
+```
+
+```{r}
+round(summary(lm_full)[4] $coefficients,4)
+```
+
+```{r}
+gym_transformed_minus_sus <-gym_transformed[-obs_to_investigate, ]
+lm_fit_without_suspicious <- lm(log_Calories_Burned~Age+log_Session_Duration+sqrt_Fat_Percentage+Gender + Workout_Type, data = gym_transformed_minus_sus)
+round(summary(lm_fit_without_suspicious,digits=3)[4]$coefficients,4)
+
+```
+
+Determine whether outliers are influential or not:
+
+-    Change in values in Beta's:
+
+    -   Age: within 2 SEs of original estimate
+
+    -   log_Session_Duration: within 2 SEs of original estimate
+
+    -   sqrt_Fat_Percentage: within 2 SEs of original estimate
+
+    -   Workout_TypeHIIT: within 2 SEs of original estimate
+
+    -   Workout_TypeStrength: within 2 SEs of original estimate
+
+    -   Workout_TypeYoga: within 2 SEs of original estimate
+
+-   Change in signs:
+
+    -   Workout_TypeStrength: from 0.0011 to -0.00063
+
+-   Change in p-value:
+
+    -   No significant change in p-values
+
+**Conclusion: The identified outliers do not have a significant
+influence on the analysis.**
+
+**Model Selection**
+
+```{r}
+gym_models <- regsubsets(log_Calories_Burned~Age+log_Session_Duration+sqrt_Fat_Percentage+Gender + Workout_Type, data=gym_transformed)
+plot(gym_models)
+```
+
+```{r}
+# Variables included in the models
+summary(gym_models)[[1]]*1
+
+# BIC for four models
+summary(gym_models)$bic
+```
+
+```{r}
+# Plot the BIC
+bic <- data.frame(Model = 1:7, BIC = summary(gym_models)$bic)
+ ggplot(data=bic, aes(x=Model, y=BIC)) +
+ geom_point(aes(color=BIC < -2190), size=3) +
+ geom_line() +
+ theme_bw() +
+ theme(legend.position = "none")
+```
+
+-   Model 3, Model 4, and Model 5 have roughly similar performance:
+
+    -   Model 3: Age, log_Session_Duration, GenderMale (versus
+        GenderFemale) (BIC=-2206.404)
+
+    -   Model 4: Age, log_Session_Duration, GenderMale (versus
+        GenderFemale), Workout_TypeYoga (versus other
+        Workout_TypenotYoga) (BIC=-2200.778)
+
+    -   Model 5: Age, log_Session_Duration, GenderMale (versus
+        GenderFemale), Workout_TypeYoga and Workout_TypeHIIT (versus
+        Workout_TypeStrength) (BIC=-2194.729)
+
+```{r}
+# Effect of the outliers on model selection
+gym_models2 <- regsubsets(log_Calories_Burned~Age+log_Session_Duration+sqrt_Fat_Percentage+Gender + Workout_Type, data = gym_transformed_minus_sus)
+plot(gym_models2)
+ 
+```
+
+```{r}
+#Variables included in the models
+summary(gym_models2)[[1]]*1
+# BIC for seven models
+summary(gym_models2)$bic
+```
+
+-   Model 3', Model 4', and Model 5' have roughly similar performance:
+
+    -   Model 3': Age, log_Session_Duration, GenderMale (versus
+        GenderFemale) (BIC=-2206.404)
+
+    -   Model 4': Age, log_Session_Duration, GenderMale (versus
+        GenderFemale), Workout_TypeYoga (versus Workout_TypenotYoga)
+        (BIC=-2200.778)
+
+    -   Model 5': Age, log_Session_Duration, GenderMale (versus
+        GenderFemale), Workout_TypeYoga and Workout_TypeHIIT (versus
+        Workout_TypenotYogaHIIT) (BIC=-2194.729)
+
+## Check if outliers have an effect on the model selection.
+
+# A. Model selection
+
+-   No difference in model 3 and 3', 4 and 4', 5 and 5'
+
+# B. Differences in the model fit:
+
+```{r}
+# Create new variables Workout_TypenotYoga
+#All data
+gym_transformed <- gym_transformed %>%
+ mutate(
+ Workout_Type_reduced_Yoga = ifelse(Workout_Type %in% c("HIIT", "Strength"), "other", "Yoga"),
+ Workout_Type_reduced_YogaHIIT = ifelse(Workout_Type %in% c("HIIT", "Strength"), "other", Workout_Type)
+ )
+
+# Without outliers
+gym_transformed_minus_sus<- gym_transformed_minus_sus %>%
+ mutate(
+ Workout_Type_reduced_Yoga = ifelse(Workout_Type %in% c("HIIT", "Strength"), "other", "Yoga"),
+ Workout_Type_reduced_YogaHIIT = ifelse(Workout_Type %in% c("HIIT", "Strength"), "other", Workout_Type)
+ )
+ 
+# Fit models 3, 4 and 5 with all the data
+fit3_all <- lm(log_Calories_Burned~Age+log_Session_Duration+Gender, data=gym_transformed)
+fit4_all <- lm(log_Calories_Burned~Age+log_Session_Duration+Gender+Workout_Type_reduced_Yoga, data=gym_transformed)
+fit5_all <- lm(log_Calories_Burned~Age+log_Session_Duration+Gender+Workout_Type_reduced_YogaHIIT, data=gym_transformed)
+ 
+ # Fit models 2, 3, and 4 without the outliers
+fit3_minus_suspicious <- lm(log_Calories_Burned~Age+log_Session_Duration+Gender, data=gym_transformed_minus_sus)
+fit4_minus_suspicious <- lm(log_Calories_Burned~Age+log_Session_Duration+Gender+Workout_Type_reduced_Yoga, data=gym_transformed_minus_sus)
+fit5_minus_suspicious <- lm(log_Calories_Burned~Age+Age+log_Session_Duration+Gender+Workout_Type_reduced_YogaHIIT, data=gym_transformed_minus_sus)
+
+summary(fit3_all)$coefficients
+summary(fit3_minus_suspicious)$coefficients
+summary(fit4_all)$coefficients
+summary(fit4_minus_suspicious)$coefficients
+summary(fit5_all)$coefficients
+summary(fit5_minus_suspicious)$coefficients
+```
+
+**No significant change in values or p-values with and without
+outliers.**
+
+**Model statement:**
+
+Based on the model selection criteria (BIC) and diagnostics, the best
+model includes `Age`, `log(Session_Duration)`, and `Gender`. The fitted
+regression equation is:
+
+$$
+\hat{\mu}_{\log(\text{Calories_Burned})} = 6.653 + 0.0034 \cdot \text{Age} + 1.0039 \cdot \log(\text{Session Duration}) + 0.098 \cdot \text{GenderMale}
+$$
+
+Where: - `GenderMale = 1` if the subject is male, and `0` if female.
+
+## **Multicollinearity.**
+
+```{r}
+vif(fit3_all)
+vif(fit3_minus_suspicious)
+
+```
+
+There's no multicollinearity issue with our data and selected models
+since all VIFs are below 4.
+
+**Hypothesis Testing**
+
+Let the response variable be `log(Calories_Burned)`. We test the
+following:
+
+-   **Age:**\
+    $H_0: \beta_1 = 0$ \
+    $H_A: \beta_1 \neq 0$
+
+-   **Session Duration:**\
+    $H_0: \beta_2 = 0$\
+    $H_A: \beta_2 \neq 0$
+
+-   **Gender:**\
+    $H_0: \beta_3 = 0$\
+    $H_A: \beta_3 \neq 0$
+
+We use the 5% significance level for all tests.
+
+### Hypothesis Test: Age
+
+From the summary of the final model (Model 3), the coefficient for `Age`
+is:
+
+-   p-value: **\< 2e-16**
+
+#### Interpretation:
+
+Because the p-value is extremely small, we have very strong statistical
+evidence against the null hypothesis. Therefore, we reject the null
+hypothesis and conclude that age has a statistically significant effect
+on the log of calories burned.
+
+#### Conclusion:
+
+There is **very strong evidence** that age has a statistically
+significant effect on the log of calories burned, holding other
+variables constant. Specifically, for each additional year of age, the
+**log of calories burned decreases by approximately 0.0034 units**, on
+average.
+
+### Hypothesis Test: Session Duration
+
+From the model summary, the coefficient for log(Session_Duration) is:
+
+p-value: **\< 2e-16**
+
+#### Interpretation:
+
+Since the p-value is much smaller than 0.05 (virtually 0), the observed
+effect is highly unlikely to have occurred by random chance under the
+null. We reject the null hypothesis and conclude that session duration
+significantly affects the log of calories burned.
+
+#### Conclusion:
+
+There is extremely strong evidence that session duration has a
+statistically significant positive effect on the log of calories burned.
+Specifically, a 1-unit increase in log(session duration) is associated
+with an increase of approximately 1.0039 units in the log of calories
+burned, on average.
+
+### Hypothesis Test: Gender
+
+From the model output, the coefficient for GenderMale (compared to
+female) is:
+
+p-value: **\< 2e-45**
+
+### Interpretation:
+
+Given that the p-value (3.98 × 10⁻⁴⁵) is far less than 0.05, we find
+overwhelming evidence that gender influences calorie expenditure. We
+reject the null hypothesis and conclude that gender has a significant
+effect on the log of calories burned.
+
+### Conclusion:
+
+There is extremely strong statistical evidence that gender affects the
+log of calories burned. On average, males burn approximately 0.098 more
+log-calories than females, holding age and session duration constant.
+
+## Model Selection and Final Model Justification
+
+Using `regsubsets()` and BIC as the model selection criterion, we
+compared several candidate models that included different combinations
+of predictors. The three best models (Model 3, 4, and 5) had similar BIC
+values, but:
+
+-   **Model 3** (with Age, log(Session_Duration), and Gender) had the
+    **lowest BIC = -2206.404**, indicating the best balance between
+    model fit and complexity.
+-   Models 4 and 5 added additional levels of `Workout_Type`, but the
+    BIC improvement was not substantial, and their coefficients were
+    statistically insignificant.
+
+Additionally, multicollinearity was assessed using the Variance
+Inflation Factor (VIF). All VIFs for Model 3 were near 1 (well below the
+common threshold of 4), both **with and without outliers**.
+
+Therefore, **Model 3 is selected as the final model** based on: - Best
+BIC score - Interpretability - Lack of multicollinearity - Robustness to
+outliers
+
+------------------------------------------------------------------------
+
+**Final Model Statement and Interpretation**
+
+$$
+\hat{\mu}_{\log(\text{Calories_Burned})} = 6.653 + 0.0034 \cdot \text{Age} + 1.0039 \cdot \log(\text{Session Duration}) + 0.098 \cdot \text{GenderMale}
+$$
+
+Where: - `GenderMale = 1` if male, `0` if female.
+
+**This model suggests that:**
+
+-   Older age slightly **decreases** log-calories burned (β = -0.0034)
+
+-   Longer session duration significantly **increases** it (β =
+    1.0039) - Males, on average, burn **more** than females (β = 0.098),
+    controlling for other variables.
+
+**Conclusion:**
+
+-   Age negatively affects log(calories burned)
+
+-   Longer workouts significantly increase calorie expenditure
+
+-   Males tend to burn more calories than females
+
+-   No significant impact from workout type after adjusting for others
